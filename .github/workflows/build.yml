@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DPLASMA_BUILD_TESTS=OFF
+        run: cmake -S . -B build -A x64 -DPLASMA_BUILD_TESTS=OFF
       - name: Build
         run: cmake --build build --config Release --target Plasma_VST3 -j 4
       - name: Collect plug-in
