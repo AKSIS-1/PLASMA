@@ -1,5 +1,7 @@
 #include "PluginEditor.h"
 
+#include "Tooltips.h"
+
 using namespace plasma;
 using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
 using ComboAtt = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
@@ -16,6 +18,31 @@ PlasmaLookAndFeel::PlasmaLookAndFeel() {
   setColour(juce::PopupMenu::textColourId, ui::text);
   setColour(juce::PopupMenu::highlightedBackgroundColourId, ui::violet);
   setColour(juce::PopupMenu::highlightedTextColourId, juce::Colours::white);
+}
+
+juce::Rectangle<int> PlasmaLookAndFeel::getTooltipBounds(const juce::String& text, juce::Point<int> pos, juce::Rectangle<int> area) {
+  juce::AttributedString as;
+  as.setJustification(juce::Justification::topLeft);
+  as.append(text, juce::Font(juce::FontOptions(12.5f)), ui::text);
+  juce::TextLayout tl;
+  tl.createLayoutWithBalancedLineLengths(as, 300.f);
+  const int w = (int)std::ceil(tl.getWidth()) + 20, h = (int)std::ceil(tl.getHeight()) + 16;
+  return juce::Rectangle<int>(pos.x > area.getCentreX() ? pos.x - w - 12 : pos.x + 14, pos.y + 18, w, h)
+      .constrainedWithin(area.reduced(4));
+}
+
+void PlasmaLookAndFeel::drawTooltip(juce::Graphics& g, const juce::String& text, int w, int h) {
+  const auto r = juce::Rectangle<float>(0.f, 0.f, (float)w, (float)h).reduced(0.5f);
+  g.setColour(ui::bg.brighter(0.05f));
+  g.fillRoundedRectangle(r, 6.f);
+  g.setColour(ui::magenta.withAlpha(0.7f));
+  g.drawRoundedRectangle(r, 6.f, 1.f);
+  juce::AttributedString as;
+  as.setJustification(juce::Justification::topLeft);
+  as.append(text, juce::Font(juce::FontOptions(12.5f)), ui::text);
+  juce::TextLayout tl;
+  tl.createLayoutWithBalancedLineLengths(as, 300.f);
+  tl.draw(g, juce::Rectangle<float>(10.f, 8.f, (float)w - 20.f, (float)h - 16.f));
 }
 
 juce::Font PlasmaLookAndFeel::getComboBoxFont(juce::ComboBox&) { return juce::Font(juce::FontOptions(13.f)); }
@@ -124,10 +151,53 @@ static juce::String formatValue(const ParamDef& d, double v) {
   return juce::String(v, 2);
 }
 
+// ===================================================================== right-click menu
+// Shows the host's own parameter menu (FL Studio: "Create automation clip", "Link to controller",
+// ...) followed by "Reset to default". Falls back to just the reset item in hosts without one.
+struct ParamContextMenu : juce::MouseListener {
+  ParamContextMenu(juce::AudioProcessorValueTreeState& a, const juce::String& id, juce::Component& c)
+      : apvts(a), paramId(id), comp(c) {
+    comp.addMouseListener(this, true);
+  }
+  ~ParamContextMenu() override { comp.removeMouseListener(this); }
+
+  void mouseDown(const juce::MouseEvent& e) override {
+    if (!e.mods.isPopupMenu()) return;
+    auto* param = apvts.getParameter(paramId);
+    if (param == nullptr) return;
+    auto* editor = comp.findParentComponentOfClass<juce::AudioProcessorEditor>();
+
+    std::shared_ptr<juce::HostProvidedContextMenu> hostMenu;
+    juce::PopupMenu menu;
+    if (editor != nullptr)
+      if (auto* ctx = editor->getHostContext())
+        if (auto m = ctx->getContextMenuForParameter(param)) {
+          hostMenu = std::move(m);
+          menu = hostMenu->getEquivalentPopupMenu();
+        }
+    if (menu.getNumItems() > 0) menu.addSeparator();
+    menu.addItem("Reset to default", [param] {
+      param->beginChangeGesture();
+      param->setValueNotifyingHost(param->getDefaultValue());
+      param->endChangeGesture();
+    });
+    menu.setLookAndFeel(&comp.getLookAndFeel());
+    auto opts = juce::PopupMenu::Options()
+                    .withTargetScreenArea(juce::Rectangle<int>(e.getScreenPosition(), e.getScreenPosition()).expanded(1))
+                    .withParentComponent(editor);
+    // the captured hostMenu keeps the host's menu alive while ours is open
+    menu.showMenuAsync(opts, [hostMenu](int) {});
+  }
+
+  juce::AudioProcessorValueTreeState& apvts;
+  juce::String paramId;
+  juce::Component& comp;
+};
+
 // ===================================================================== widgets
 namespace {
 
-struct Knob : juce::Component {
+struct Knob : juce::Component, juce::SettableTooltipClient {
   Knob(juce::AudioProcessorValueTreeState& apvts, P id, const juce::String& caption) : caption_(caption) {
     const ParamDef& def = paramDefs()[(int)id];
     slider.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
@@ -142,6 +212,10 @@ struct Knob : juce::Component {
     slider.valueFromTextFunction = [](const juce::String& t) { return (double)t.getFloatValue(); };
     slider.setDoubleClickReturnValue(true, def.def);
     slider.updateText();
+    const auto tip = tips::forParam(def.id);
+    slider.setTooltip(tip);
+    setTooltip(tip);
+    menu = std::make_unique<ParamContextMenu>(apvts, def.id, *this);
   }
   void resized() override { slider.setBounds(getLocalBounds().withTrimmedTop(13)); }
   void paint(juce::Graphics& g) override {
@@ -151,6 +225,7 @@ struct Knob : juce::Component {
   }
   juce::Slider slider;
   std::unique_ptr<SliderAtt> att;
+  std::unique_ptr<ParamContextMenu> menu;
   juce::String caption_;
 };
 
@@ -160,16 +235,23 @@ struct Combo : juce::ComboBox {
     int i = 1;
     for (const auto& s : def.choiceList()) addItem(s, i++);
     att = std::make_unique<ComboAtt>(apvts, def.id, *this);
+    setTooltip(tips::forParam(def.id));
+    menu = std::make_unique<ParamContextMenu>(apvts, def.id, *this);
   }
   std::unique_ptr<ComboAtt> att;
+  std::unique_ptr<ParamContextMenu> menu;
 };
 
 struct Toggle : juce::ToggleButton {
   Toggle(juce::AudioProcessorValueTreeState& apvts, P id, const juce::String& text) {
     setButtonText(text);
-    att = std::make_unique<ButtonAtt>(apvts, paramDefs()[(int)id].id, *this);
+    const char* pid = paramDefs()[(int)id].id;
+    att = std::make_unique<ButtonAtt>(apvts, pid, *this);
+    setTooltip(tips::forParam(pid));
+    menu = std::make_unique<ParamContextMenu>(apvts, pid, *this);
   }
   std::unique_ptr<ButtonAtt> att;
+  std::unique_ptr<ParamContextMenu> menu;
 };
 
 // Live wavetable view: ghost stack of frames + the currently selected (interpolated) frame
@@ -336,6 +418,7 @@ struct MatrixPanel : Panel {
     std::unique_ptr<Combo> src, dst;
     juce::Slider amt;
     std::unique_ptr<SliderAtt> att;
+    std::unique_ptr<ParamContextMenu> menu;
   };
   MatrixPanel(PlasmaProcessor& p) : Panel(p, "MOD MATRIX") {
     titleW = 40;
@@ -356,6 +439,9 @@ struct MatrixPanel : Panel {
       r->amt.valueFromTextFunction = [](const juce::String& t) { return t.getDoubleValue() / 100.0; };
       r->amt.setDoubleClickReturnValue(true, 0.0);
       r->amt.updateText();
+      const char* amtId = paramDefs()[(int)(b + 2)].id;
+      r->amt.setTooltip(tips::forParam(amtId));
+      r->menu = std::make_unique<ParamContextMenu>(p.apvts, amtId, r->amt);
       rows.push_back(std::move(r));
     }
   }
@@ -540,6 +626,10 @@ PlasmaEditor::PlasmaEditor(PlasmaProcessor& p) : AudioProcessorEditor(&p), proc_
   voices_.setJustificationType(juce::Justification::centredRight);
   voices_.setColour(juce::Label::textColourId, ui::dim);
   addAndMakeVisible(voices_);
+  tipsBtn_.setToggleState(true, juce::dontSendNotification);
+  tipsBtn_.setTooltip("Show or hide these help tooltips.");
+  tipsBtn_.onClick = [this] { tooltips_.setMillisecondsBeforeTipAppears(tipsBtn_.getToggleState() ? 450 : 3600000); };
+  addAndMakeVisible(tipsBtn_);
   showPage(0);
   setSize(1100, 610);
   startTimerHz(10);
@@ -576,7 +666,8 @@ void PlasmaEditor::resized() {
   nextBtn_.setBounds(726, 14, 28, 30);
   saveBtn_.setBounds(766, 14, 60, 30);
   loadBtn_.setBounds(832, 14, 60, 30);
-  voices_.setBounds(getWidth() - 140, 14, 124, 30);
+  tipsBtn_.setBounds(904, 14, 62, 30);
+  voices_.setBounds(getWidth() - 120, 14, 104, 30);
   const auto content = juce::Rectangle<int>(0, 56, getWidth(), getHeight() - 56);
   for (auto* c : {&pages_->sound, &pages_->mod, &pages_->fx}) c->setBounds(content);
 }

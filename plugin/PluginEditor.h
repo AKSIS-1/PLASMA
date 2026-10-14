@@ -21,6 +21,8 @@ class PlasmaLookAndFeel : public juce::LookAndFeel_V4 {
   juce::Font getComboBoxFont(juce::ComboBox&) override;
   juce::Font getTextButtonFont(juce::TextButton&, int) override;
   juce::Label* createSliderTextBox(juce::Slider&) override;
+  juce::Rectangle<int> getTooltipBounds(const juce::String&, juce::Point<int>, juce::Rectangle<int>) override;
+  void drawTooltip(juce::Graphics&, const juce::String&, int w, int h) override;
 };
 
 class PlasmaEditor : public juce::AudioProcessorEditor, private juce::Timer {
@@ -44,6 +46,8 @@ class PlasmaEditor : public juce::AudioProcessorEditor, private juce::Timer {
   juce::TextButton saveBtn_{"Save"}, loadBtn_{"Load"}, prevBtn_{"<"}, nextBtn_{">"};
   juce::ComboBox presetBox_;
   juce::Label voices_;
+  juce::ToggleButton tipsBtn_{"Tips"};
+  juce::TooltipWindow tooltips_{this, 450};
   std::unique_ptr<juce::FileChooser> chooser_;
   int page_ = 0;
 };
