@@ -194,6 +194,35 @@ int main() {
     CHECK(fin && pk > 0.05f, "preset '%s' audible and finite (peak %.2f)", pr.name, pk);
   }
 
+  // 9. Declick: no DC offset and a clean onset/release (regression for note-start pops)
+  {
+    auto dcMean = [&](ParamSet p, int note) {
+      auto o = renderNote(p, note, 1.0f, sr);
+      double m = 0; int c = 0;
+      for (size_t i = (size_t)(0.4f * sr); i < o.size(); ++i) { m += o[i]; ++c; }
+      return m / c;
+    };
+    ParamSet organ;
+    for (const auto& pr : factoryPresets()) if (std::string(pr.name) == "Organ Wobble") applyPreset(organ, pr);
+    CHECK(std::fabs(dcMean(organ, 48)) < 0.003, "Organ Wobble has no DC offset (mean %.5f)", dcMean(organ, 48));
+    ParamSet asym; asym.v[(int)P::a_warp] = 5; asym.v[(int)P::a_warpamt] = 0.6f;
+    CHECK(std::fabs(dcMean(asym, 48)) < 0.003, "Asym warp has no DC offset (mean %.5f)", dcMean(asym, 48));
+    ParamSet dist; dist.v[(int)P::dist_on] = 1; dist.v[(int)P::dist_drive] = 0.8f; dist.v[(int)P::a_table] = 6;
+    CHECK(std::fabs(dcMean(dist, 48)) < 0.01, "Distortion keeps DC low (mean %.5f)", dcMean(dist, 48));
+
+    // first samples start from silence, even with 1 ms attack requested
+    ParamSet fast; fast.v[(int)P::env1_a] = 0.001f;
+    for (int note : {36, 60, 84}) {
+      auto o = renderNote(fast, note, 0.1f, sr);
+      CHECK(std::fabs(o[0]) < 0.001f, "note %d starts from silence (%.5f)", note, o[0]);
+    }
+    // attack is monotone (no overshoot) after the minimum-time clamp
+    Adsr env; env.setParams(0.001f, 0.2f, 0.7f, 0.2f, sr); env.noteOn();
+    float prev = 0, worstDrop = 0;
+    for (int i = 0; i < 140; ++i) { float v = env.tick(); worstDrop = std::max(worstDrop, prev - v); prev = v; }
+    CHECK(worstDrop < 1e-6f, "attack stage is monotone");
+  }
+
   std::printf("\n%s (%d failures)\n", failures ? "FAILED" : "ALL PASSED", failures);
   return failures ? 1 : 0;
 }

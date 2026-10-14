@@ -75,9 +75,13 @@ class Synth {
       if (v.active()) v.render(L, R, n, global_);
     fx_.process(L, R, n, params_, global_.bpm);
     const float m = params_.get(P::master);
+    const float dcR = 1.f - 2.f * (float)kPi * 6.f / sr_;
     for (int i = 0; i < n; ++i) {
-      L[i] = limit(L[i] * m);
-      R[i] = limit(R[i] * m);
+      // master DC blocker (~6 Hz) catches offsets created by distortion
+      const float yl = L[i] - dcXl_ + dcR * dcYl_; dcXl_ = L[i]; dcYl_ = yl;
+      const float yr = R[i] - dcXr_ + dcR * dcYr_; dcXr_ = R[i]; dcYr_ = yr;
+      L[i] = limit(yl * m);
+      R[i] = limit(yr * m);
     }
   }
 
@@ -137,7 +141,7 @@ class Synth {
     }
   }
 
-  float sr_ = 48000.f, bend_ = 0.f;
+  float sr_ = 48000.f, bend_ = 0.f, dcXl_ = 0.f, dcYl_ = 0.f, dcXr_ = 0.f, dcYr_ = 0.f;
   bool sustain_ = false;
   int lastNote_ = -1;
   uint64_t counter_ = 0;

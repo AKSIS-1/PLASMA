@@ -56,7 +56,7 @@ inline const std::vector<Preset>& factoryPresets() {
         {"rev_on", 1}, {"rev_size", 0.75f}, {"rev_mix", 0.3f}}},
       {"Organ Wobble",
        {{"a_table", 6}, {"a_pos", 0.5f}, {"a_uni", 2}, {"a_detune", 0.08f},
-        {"flt_cutoff", 9000}, {"env1_a", 0.005f}, {"env1_d", 0.1f}, {"env1_s", 1.0f}, {"env1_r", 0.08f},
+        {"flt_cutoff", 9000}, {"env1_a", 0.012f}, {"env1_d", 0.1f}, {"env1_s", 1.0f}, {"env1_r", 0.14f},
         {"slot1_src", F(Src::Lfo1)}, {"slot1_dst", F(Dest::APos)}, {"slot1_amt", 0.3f},
         {"lfo1_rate", 0.4f}, {"lfo1_shape", 1}, {"cho_on", 1}, {"dist_on", 1}, {"dist_drive", 0.12f}, {"dist_mix", 0.6f}}},
       {"Acid Pluck",

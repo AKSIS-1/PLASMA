@@ -28,6 +28,8 @@ class Voice {
 
   void prepare(float sr) {
     sr_ = sr;
+    kDcR = 1.f - 2.f * (float)kPi * 8.f / sr;
+    fadeInc_ = 1.f / (0.004f * sr);
     filter_.prepare(sr);
   }
   bool active() const { return env1_.active(); }
@@ -56,6 +58,8 @@ class Voice {
       filter_.reset();
       env1_.kill(); env2_.kill(); env3_.kill();
       for (auto& m : lastMod_) m = 0.f;
+      fade_ = 0.f;
+      dcX_[0] = dcX_[1] = dcY_[0] = dcY_[1] = 0.f;
       for (int i = 0; i < 4; ++i) lfo_[i].reset(0.f, rng_);
       subOsc_.reset();
     }
@@ -92,7 +96,14 @@ class Voice {
       if (subOn_) { const float s = subOsc_.tick(subShape_, subInc_) * subLevel_; l += s; r += s; }
       if (noiseLevel_ > 0.f) { l += noiseLevel_ * rng_.next(); r += noiseLevel_ * rng_.next(); }
       if (fltOn_) filter_.process(l, r);
-      const float e = env1_.tick();
+      // DC blocker (~8 Hz): asymmetric waveshapes/warps would otherwise shift the output when
+      // a note starts or ends, which is heard as a pop.
+      {
+        const float yl = l - dcX_[0] + kDcR * dcY_[0]; dcX_[0] = l; dcY_[0] = yl; l = yl;
+        const float yr = r - dcX_[1] + kDcR * dcY_[1]; dcX_[1] = r; dcY_[1] = yr; r = yr;
+      }
+      float e = env1_.tick();
+      if (fade_ < 1.f) { fade_ += fadeInc_; if (fade_ > 1.f) fade_ = 1.f; e *= fade_ * fade_ * (3.f - 2.f * fade_); }
       env2_.tick(); env3_.tick();
       ampCur_ += ampStep_;
       panCurL_ += panStepL_;
@@ -217,7 +228,8 @@ class Voice {
     panStepR_ = (pr - panCurR_) / kControl;
   }
 
-  float sr_ = 48000.f;
+  float sr_ = 48000.f, kDcR = 0.999f, fadeInc_ = 0.005f, fade_ = 1.f;
+  float dcX_[2] = {}, dcY_[2] = {};
   int note_ = 60, countdown_ = 0;
   bool gate_ = false, first_ = true;
   float vel_ = 1.f, rnd_ = 0.f, curNote_ = 60.f;
