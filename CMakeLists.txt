@@ -49,12 +49,19 @@ if(PLASMA_BUILD_PLUGIN)
     COPY_PLUGIN_AFTER_BUILD FALSE
     VST3_CATEGORIES Instrument Synth)
 
+  juce_add_binary_data(PlasmaAssets SOURCES
+    assets/fonts/BarlowSemiCondensed-SemiBold.ttf
+    assets/fonts/BarlowSemiCondensed-Medium.ttf
+    assets/fonts/IBMPlexMono-Regular.ttf
+    assets/fonts/IBMPlexMono-Medium.ttf
+    assets/fonts/VarelaRound-Regular.ttf)
+
   target_sources(Plasma PRIVATE
     plugin/PluginProcessor.cpp
     plugin/PluginEditor.cpp)
   target_compile_definitions(Plasma PUBLIC
     JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_VST3_CAN_REPLACE_VST2=0 JUCE_DISPLAY_SPLASH_SCREEN=0)
   target_link_libraries(Plasma
-    PRIVATE plasma_core juce::juce_audio_utils juce::juce_dsp
+    PRIVATE plasma_core PlasmaAssets juce::juce_audio_utils juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags juce::juce_recommended_warning_flags)
 endif()
