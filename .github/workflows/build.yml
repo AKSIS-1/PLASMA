@@ -1,0 +1,43 @@
+name: Build Plasma
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  core-tests:
+    name: DSP core tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build-core -DPLASMA_BUILD_PLUGIN=OFF -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build-core --config Release -j
+      - name: Run tests
+        run: ./build-core/plasma_tests
+
+  windows-vst3:
+    name: Windows VST3
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DPLASMA_BUILD_TESTS=OFF
+      - name: Build
+        run: cmake --build build --config Release --target Plasma_VST3 -j 4
+      - name: Collect plug-in
+        shell: pwsh
+        run: |
+          $vst3 = Get-ChildItem -Path build -Recurse -Directory -Filter "Plasma.vst3" | Select-Object -First 1
+          if (-not $vst3) { throw "Plasma.vst3 not found" }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item -Recurse -Force $vst3.FullName dist/Plasma.vst3
+          Copy-Item README.md dist/README.md
+          Get-ChildItem -Recurse dist | Select-Object FullName, Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Plasma-VST3-Windows-x64
+          path: dist
+          if-no-files-found: error
